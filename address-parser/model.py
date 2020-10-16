@@ -2,11 +2,14 @@ import json
 import os
 
 import tensorflow as tf
-from tensorflow.keras.layers import Bidirectional, Embedding, GRU, Dense
+from tensorflow.keras.layers import Bidirectional, Embedding, GRU, Dense, SpatialDropout1D
 
 import dataset as ds
 
 import numpy as np
+
+import matplotlib.pyplot as plt
+
 
 CHECKPOINT_PATH = os.path.join(os.path.dirname(__file__), '..', "saved_models", "model1.ckpt")
 
@@ -14,8 +17,11 @@ CHECKPOINT_PATH = os.path.join(os.path.dirname(__file__), '..', "saved_models", 
 def model_fn(embedding_dim, GRU_units, vocab_size, show_summary=False):
     model = tf.keras.Sequential([
         Embedding(vocab_size, embedding_dim, batch_input_shape=[None, None], mask_zero=True),
-        Bidirectional(GRU(units=GRU_units, dropout=0.8, recurrent_dropout=0.8, return_sequences=True),
-                      merge_mode='sum'),
+        SpatialDropout1D(0.2),
+        Bidirectional(GRU(units=GRU_units,
+                          dropout=0.5,
+                          recurrent_dropout=0.5,
+                          return_sequences=True), merge_mode='sum'),
         Dense(units=15, activation='softmax')
     ])
     model.compile(optimizer='adam', loss=tf.keras.losses.SparseCategoricalCrossentropy(), metrics=['accuracy'])
@@ -23,6 +29,19 @@ def model_fn(embedding_dim, GRU_units, vocab_size, show_summary=False):
         model.summary()
 
     return model
+
+def train_model(model, dataset, epochs):
+    callback = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH, save_weights_only=True, verbose=1)
+
+    history = model.fit(x=dataset['train'], epochs=epochs, callbacks=[callback])
+    loss_plot = plt.plot(history['loss'])
+    plt.show(loss_plot)
+
+    loss, accuracy = model.evaluate(x=dataset['test'])
+
+    print('Test Loss: {}'.format(loss))
+    print('Test Accuracy: {}'.format(accuracy))
+
 
 
 def predictions_to_json(address, predictions):
@@ -48,9 +67,7 @@ def predictions_to_json(address, predictions):
 
 
 def predict_one(address):
-    with open('/Users/iyevenko/Documents/GitHub/Address-Parser/address-parser/tokenizer.json') as f:
-        tokenizer_json = f.readline()
-    tokenizer = tf.keras.preprocessing.text.tokenizer_from_json(tokenizer_json)
+    tokenizer = ds.get_saved_tokinizer()
 
     vocab_size = len(tokenizer.word_index) + 1
     model = model_fn(embedding_dim=256, GRU_units=128, vocab_size=vocab_size)
@@ -64,15 +81,15 @@ def predict_one(address):
     # noinspection PyTypeChecker
     print(predictions_to_json(address, predictions))
 
-
 if __name__ == '__main__':
-    predict_one("914 Maramis crt")
+    ds.generate_en_us_dataset(n_x=1e6)
 
+    tokenizer = ds.get_saved_tokinizer()
+    model = model_fn(embedding_dim=256, GRU_units=128,  vocab_size=len(tokenizer.word_index)+1, show_summary=True)
+    dataset = ds.input_fn(128, 1e6)
 
-    # model = model_fn(embedding_dim=256, GRU_units=128,  vocab_size=)
-    #
-    # loss, accuracy = model.evaluate(x=dataset['test'])
-    # print('Test Loss: {}'.format(loss))
-    # print('Test Accuracy: {}'.format(accuracy))
-    # callback = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH, save_weights_only=True, verbose=1)
-    # model.fit(x=dataset['train'], epochs=5, callbacks=[callback])
+    train_model(model, dataset, epochs=10)
+
+    predict_one("799 E Drgram Suite 5A, Tucson AZ 85705, USA")
+    predict_one("1600 Amphitheatre Pkwy, Mountain View, CA 94043, United States")
+
